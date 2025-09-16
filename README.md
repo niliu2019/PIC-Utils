@@ -1,6 +1,4 @@
 # PIC-Utils
-
-# PIC-Utils
 A Utility Module Collection for PIC/MCC Solver
 
 ## Module Overview
@@ -10,6 +8,7 @@ A Utility Module Collection for PIC/MCC Solver
 | Differential Interpolation   | UtilDiffInterpolation.f90   | Provides various numerical differentiation and interpolation methods               |
 | Timer                        | UtilTimer.f90               | Implements a timer system with value transition and callback support               |
 | Dynamic Vector               | UtilVector.f90              | Implements a dynamic, resizable array for Real(8) values with memory management    |
+| Register Dump               | UtilRegisterDump.f90        | Efficient variable registration and data output system for simulation diagnostics  |
 
 ---
 
@@ -63,5 +62,25 @@ This module implements a dynamic vector (resizable array) data structure for Rea
 - Storing and manipulating simulation data
 - Implementing dynamic lists or buffers
 - Managing large datasets with variable size
+
+---
+
+## 4. Register Dump Module
+**File:** `UtilRegisterDump.f90`
+
+This module provides an efficient system for registering, tracking, and outputting simulation variables to files. It features optimized variable lookup, automatic file management, and formatted data output capabilities, making it ideal for simulation diagnostics and result analysis.
+
+**Features:**
+- Fast variable registration with hash-based lookup
+- Efficient memory management with dynamic resizing
+- Automatic header generation and formatted output
+- Pointer-based variable tracking for zero-copy updates
+- Support for various file opening modes and output formats
+
+**Use Cases:**
+- Simulation diagnostics and data collection
+- Generating time series output for post-processing
+- Performance monitoring and analysis
+- Creating formatted data files for scientific visualization
 
 ---
