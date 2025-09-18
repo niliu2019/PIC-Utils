@@ -1,56 +1,11 @@
-!> =========================================================
-!> Module: ModuleRegisterDump
-!> Author: Mao ZiAn
-!> Created Time: 2025-09-16
-!> =========================================================
-!> 
-!> @brief Efficient variable registration and data output system for simulation diagnostics
-!>
-!> This module provides a system for registering and tracking simulation variables,
-!> and outputting them to formatted data files. It features optimized variable lookup
-!> using hash tables, automatic file management, and formatted data output.
-!>
-!> The RegisterDump type supports:
-!> - Fast variable registration with hash-based lookup
-!> - Efficient memory management with dynamic resizing
-!> - Automatic header generation and formatted output
-!> - Pointer-based variable tracking for zero-copy updates
-!> - Support for various file opening modes and output formats
-!> - Support register variables in Loop without performance penalty !!
-!>
-!> Usage Example:
-!>   Type(RegisterDump) :: diag
-!>   Real(8) :: var1 = 1.0, var2 = 2.0, time = 0.0
-!>
-!>   ! Initialize and open file
-!>   Call diag%Init("output.dat")
-!>   Call diag%Open()
-!>   
-!>   ! Register variables
-!>   Call diag%Register("variable1", var1)
-!>   Call diag%Register("variable2", var2)
-!>   
-!>   ! Dump values at different time steps
-!>   Do while (time < 10.0)
-!>     var1 = var1 * 1.01
-!>     var2 = var2 + 0.5
-!>     time = time + 0.1
-!>     Call diag%Register("variable1", var1)  ! Registered variable will skip so register in loop safely
-!>     Call diag%Register("variable2", var2)
-!>     Call diag%Dump(time)
-!>   End Do
-!>   
-!>   ! Cleanup
-!>   Call diag%Close()
-!>   Call diag%Destroy()
-!>
-
 Module ModuleRegisterDump
 Implicit None
 
     ! Initial size for arrays
     Integer, Parameter :: INITIAL_SIZE = 4  
-    Integer, Parameter :: FMT_DEFAULT = 1   ! Default format for output
+    Integer, Parameter :: FMT_DEFAULT = 1       ! Default   format
+    Integer, Parameter :: FMT_REAL_4 = 2        ! Float     format
+    Integer, Parameter :: FMT_REAL_8 = 3        ! Double    format
 
 Type :: VarPointer
     Real(8), Pointer :: ptr => null()  ! Pointer to track variable values
@@ -62,6 +17,7 @@ Type RegisterDump
     Integer(4)                          :: fmt               ! Format option
     Integer(4)                          :: var_num = 0       ! Number of registered variables
     Integer(4)                          :: file_unit = -1    ! File unit number for output
+    Integer(4), Allocatable             :: fmt_list(:)
     Logical, Allocatable                :: register_list(:)  ! Track registered status
     Type(VarPointer), Allocatable       :: var_ptrs(:)       ! Pointers to variables
     Logical                             :: header_written = .false. ! Track if header has been written
@@ -107,11 +63,13 @@ contains
         Allocate(this%register_list(INITIAL_SIZE))
         Allocate(this%var_ptrs(INITIAL_SIZE))
         Allocate(this%var_hash_table(INITIAL_SIZE))
+        Allocate(this%fmt_list(INITIAL_SIZE))
 
         ! Initialize arrays
         this%id = ""
         this%register_list = .false.
         this%var_hash_table = 0
+        this%fmt_list = FMT_DEFAULT
     End Subroutine Init
     
     ! Open the dump file with specified parameters
@@ -164,10 +122,11 @@ contains
     End Subroutine Open
 
     ! Register a variable with a specific ID
-    Subroutine Register(this, var_id, var)
+    Subroutine Register(this, var_id, var, fmt)
         Class(RegisterDump), Intent(inout)      :: this
         Character(len=*), Intent(in)            :: var_id
         Real(8), Target, Intent(in)             :: var
+        Integer(4), Intent(in), Optional        :: fmt
 
         Integer :: i, hash_val, idx
         Logical :: found
@@ -191,6 +150,13 @@ contains
             this%register_list(1) = .true.
             this%var_ptrs(1)%ptr => var
             
+            ! Set format
+            if (Present(fmt)) Then
+                this%fmt_list(1) = fmt
+            else
+                this%fmt_list(1) = FMT_DEFAULT
+            end if
+
             ! Update last registered
             this%last_registered = var_id_local
             
@@ -250,6 +216,13 @@ contains
             this%register_list(this%var_num) = .true.
             this%var_ptrs(this%var_num)%ptr => var
             
+            ! Set format
+            if (Present(fmt)) Then
+                this%fmt_list(this%var_num) = fmt
+            else
+                this%fmt_list(this%var_num) = FMT_DEFAULT
+            end if
+            
             ! Update last registered
             this%last_registered = var_id_local
             
@@ -267,6 +240,7 @@ contains
     Subroutine WriteHeader(this)
         Class(RegisterDump), Intent(inout)      :: this
         Integer :: i
+        Character(len=20) :: fmt_str
         
         ! Check if file is open
         If (this%file_unit <= 0) Return
@@ -277,8 +251,8 @@ contains
         ! Write all variable names
         Do i = 1, this%var_num
             If (this%register_list(i)) Then
-                ! Use A format with width matching the data output format
-                Write(this%file_unit, '(A15)', advance='no') trim(adjustl(this%id(i)))
+                fmt_str = GetFormatHeader(this%fmt_list(i))
+                Write(this%file_unit, fmt_str, advance='no') trim(adjustl(this%id(i)))
             End If
         End Do
         
@@ -292,6 +266,7 @@ contains
     Subroutine Dump(this, time)
         Class(RegisterDump), Intent(inout)      :: this
         Real(8), Intent(in), Optional           :: time
+        Character(len=20)                       :: fmt_str
         
         Integer :: i
 
@@ -314,7 +289,8 @@ contains
         ! Write all registered variables
         Do i = 1, this%var_num
             If (this%register_list(i) .and. Associated(this%var_ptrs(i)%ptr)) Then
-                Write(this%file_unit, '(ES15.7)', advance='no') this%var_ptrs(i)%ptr
+                fmt_str = GetFormat(this%fmt_list(i))
+                Write(this%file_unit, fmt_str, advance='no') this%var_ptrs(i)%ptr
             End If
         End Do
         
@@ -350,6 +326,7 @@ contains
         If (Allocated(this%register_list)) Deallocate(this%register_list)
         If (Allocated(this%var_ptrs)) Deallocate(this%var_ptrs)
         If (Allocated(this%var_hash_table)) Deallocate(this%var_hash_table)
+        If (Allocated(this%fmt_list)) Deallocate(this%fmt_list)
         
         this%var_num = 0
         this%header_written = .false.
@@ -365,6 +342,7 @@ contains
         Logical, Allocatable                    :: temp_register_list(:)
         Type(VarPointer), Allocatable           :: temp_var_ptrs(:)
         Integer(4), Allocatable                 :: temp_hash_table(:)
+        Integer(4), Allocatable                 :: temp_fmt_list(:)
         Integer                                 :: new_size, i
 
         new_size = 2 * size(this%id)
@@ -373,6 +351,7 @@ contains
         Allocate(temp_register_list(new_size))
         Allocate(temp_var_ptrs(new_size))
         Allocate(temp_hash_table(new_size))
+        Allocate(temp_fmt_list(new_size))
         
         temp_id = ""
         temp_register_list = .false.
@@ -383,6 +362,7 @@ contains
             temp_id(i) = this%id(i)
             temp_register_list(i) = this%register_list(i)
             temp_var_ptrs(i)%ptr => this%var_ptrs(i)%ptr
+            temp_fmt_list(i) = this%fmt_list(i)
             
             ! We don't copy hash table values as they'll be regenerated
         End Do
@@ -396,10 +376,39 @@ contains
         Call Move_Alloc(temp_register_list, this%register_list)
         Call Move_Alloc(temp_var_ptrs, this%var_ptrs)
         Call Move_Alloc(temp_hash_table, this%var_hash_table)
+        Call Move_Alloc(temp_fmt_list, this%fmt_list)
         
         ! Rebuild hash table after resize
         Call RebuildHashTable(this)
     End Subroutine ResizeArrays
+
+    Function GetFormat(fmt) Result(fmt_str)
+        Integer(4), Intent(in) :: fmt
+        Character(len=20) :: fmt_str
+
+        Select Case (fmt)
+            Case (FMT_REAL_4)
+                fmt_str = '(ES15.7)'
+            Case (FMT_REAL_8)
+                fmt_str = '(ES21.14)'
+            Case Default
+                fmt_str = '(ES15.7)'  ! Default format
+        End Select
+    End Function GetFormat
+
+    Function GetFormatHeader(fmt) Result(fmt_str)
+        Integer(4), Intent(in) :: fmt
+        Character(len=20) :: fmt_str
+
+        Select Case (fmt)
+            Case (FMT_REAL_4)
+                fmt_str = '(A15)'
+            Case (FMT_REAL_8)
+                fmt_str = '(A21)'
+            Case Default
+                fmt_str = '(A15)'  ! Default format
+        End Select
+    End Function GetFormatHeader
 
     ! Function to get an available file unit
     Function GetFreeUnit() Result(unit_number)
